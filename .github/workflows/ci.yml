@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Check the MCP tools register
+        run: |
+          python -c "
+          import asyncio, mcp_server
+          tools = asyncio.run(mcp_server.server.list_tools())
+          names = sorted(t.name for t in tools)
+          print('registered tools:', names)
+          required = {'log_checkin', 'get_status', 'schedule_checkin', 'escalate'}
+          missing = required - set(names)
+          assert not missing, f'missing required tools: {missing}'
+          print('all four required tools are registered')
+          "
+
+      - name: Check the protocol version requirement
+        run: |
+          python -c "
+          from mcp_types.version import LATEST_HANDSHAKE_VERSION, is_version_at_least
+          print('latest handshake version:', LATEST_HANDSHAKE_VERSION)
+          assert is_version_at_least(LATEST_HANDSHAKE_VERSION, '2025-11-25')
+          print('the SDK satisfies the 2025-11-25-or-later requirement')
+          "
