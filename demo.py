@@ -7,8 +7,8 @@ MCP server through the real agent - nothing is mocked.
     Terminal 2:  python web_app.py
     Terminal 3:  python demo.py
 
-Use --fast to shorten the wait for the missed check-in, or --reset to start
-from a freshly seeded database.
+Use --fast for a 15-second schedule (about a 30-second wait), or --reset to
+start from a freshly seeded database.
 """
 
 from __future__ import annotations
@@ -45,9 +45,9 @@ def reply(text: str) -> None:
 
 
 async def run(fast: bool) -> int:
-    interval_minutes = 1
-    grace_seconds = 3 if fast else 20
-    wait_seconds = (interval_minutes * 60) + grace_seconds + 8
+    interval_minutes = 0.25 if fast else 1
+    grace_seconds = 5 if fast else 20
+    wait_seconds = int(interval_minutes * 60) + grace_seconds + 8
 
     async with CheckInAgent(MCP_URL) as agent:
         print(f"Connected to the MCP server at {MCP_URL}")
@@ -102,7 +102,12 @@ async def run(fast: bool) -> int:
 
         # ------------------------------------------------------------------
         step("5", "A missed check-in raises an alert after the grace window")
-        print(f"{DIM}  giving Samuel a {interval_minutes} minute schedule "
+        interval_label = (
+            f"{int(round(interval_minutes * 60))}-second"
+            if interval_minutes < 1
+            else f"{interval_minutes:g}-minute"
+        )
+        print(f"{DIM}  giving Samuel a {interval_label} schedule "
               f"with a {grace_seconds}s grace window{RESET}")
         await agent.call_tool(
             "schedule_checkin",

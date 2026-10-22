@@ -113,7 +113,7 @@ control. The README has the full run-through and the test command.
 - [x] Four required tools registered, plus `resolve_alert` for the dashboard
 - [x] Product feedback for every tool/API/SDK used (`PRODUCT_FEEDBACK.md`)
 - [x] Optional friction log (`FRICTION_LOG.md`)
-- [x] 60 automated tests, all passing
+- [x] 64 automated tests, all passing
 - [ ] Demo video recorded, public, English, under 3 minutes
 - [ ] Video URL pasted above and played while logged out
 - [ ] Team names filled in

@@ -37,7 +37,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from dotenv import load_dotenv
 from mcp.client import Client
+
+# The web app imports this module directly, so load .env here as well. Without
+# this, AI mode would never see ANTHROPIC_API_KEY in the web process.
+load_dotenv()
 
 MCP_URL = os.getenv("MCP_URL", "http://127.0.0.1:8000/mcp")
 
@@ -495,7 +500,11 @@ def resolve_speaker(
                 return person["name"]
 
     text = utterance.lower()
-    matches = [alias for alias in aliases if alias in text]
+    matches = [
+        alias
+        for alias in aliases
+        if re.search(rf"\b{re.escape(alias)}\b", text)
+    ]
     if matches:
         # Prefer the longest alias so "elena whitfield" beats "elena".
         best = max(matches, key=len)
@@ -750,7 +759,9 @@ class CheckInAgent:
         # mode. A model can add nuance, but it cannot downgrade an explicit
         # request for help.
         if intent == "help_request":
-            return await self._handle_help(utterance, resolved_speaker, roster, matched)
+            return await self._handle_help(
+                utterance, resolved_speaker, roster, matched, source
+            )
 
         if self._llm is not None:
             try:
@@ -768,7 +779,9 @@ class CheckInAgent:
         if intent == "status_query":
             return await self._handle_status(utterance, resolved_speaker)
         if intent == "routine_checkin":
-            return await self._handle_checkin(utterance, resolved_speaker, roster)
+            return await self._handle_checkin(
+                utterance, resolved_speaker, roster, source
+            )
         return await self._handle_unknown(utterance, roster)
 
     # -- AI mode ---------------------------------------------------------
@@ -929,6 +942,7 @@ class CheckInAgent:
         speaker: Optional[str],
         roster: list[dict[str, Any]],
         matched: Optional[str],
+        source: str = "voice",
     ) -> AgentResult:
         if speaker is None:
             return AgentResult(
@@ -952,7 +966,7 @@ class CheckInAgent:
                 "status": "help",
                 "message": utterance,
                 "mood": detect_mood(utterance),
-                "source": "voice",
+                "source": source if source in {"voice", "web"} else "voice",
             },
         )
 
@@ -981,6 +995,8 @@ class CheckInAgent:
                         "person": speaker,
                         "status": "help",
                         "message": utterance,
+                        "mood": detect_mood(utterance),
+                        "source": source if source in {"voice", "web"} else "voice",
                     },
                 },
             ],
@@ -993,6 +1009,7 @@ class CheckInAgent:
         utterance: str,
         speaker: Optional[str],
         roster: list[dict[str, Any]],
+        source: str = "voice",
     ) -> AgentResult:
         if speaker is None:
             return AgentResult(
@@ -1002,6 +1019,7 @@ class CheckInAgent:
             )
 
         mood = detect_mood(utterance)
+        source = source if source in {"voice", "web"} else "voice"
         data = await self.call_tool(
             "log_checkin",
             {
@@ -1009,7 +1027,7 @@ class CheckInAgent:
                 "status": "ok",
                 "message": utterance,
                 "mood": mood,
-                "source": "voice",
+                "source": source,
             },
         )
         next_due = data.get("next_due")
@@ -1030,6 +1048,7 @@ class CheckInAgent:
                         "status": "ok",
                         "message": utterance,
                         "mood": mood,
+                        "source": source,
                     },
                 }
             ],
@@ -1093,17 +1112,21 @@ class CheckInAgent:
             state = person.get("state", "unknown")
             label = person.get("name", "someone")
             if state in ("help_requested", "missed", "overdue"):
-                parts.append(f"{label} needs attention")
+                parts.append(f"{label} needs attention.")
             elif state == "never_checked_in":
-                parts.append(f"{label} has not checked in yet")
+                parts.append(f"{label} has not checked in yet.")
             else:
                 last = person.get("last_checkin")
-                when = last.get("checked_at") if last else "never"
-                parts.append(f"{label} last checked in at {when}")
+                when = format_due(last.get("checked_at")) if last else "never"
+                parts.append(f"{label} last checked in at {when}.")
 
         reply = " ".join(parts) if parts else "I have no check-ins recorded yet."
         if open_alerts:
-            reply += f" There {len(open_alerts)} open alert(s) on the dashboard."
+            count = len(open_alerts)
+            reply += (
+                f" There {'is' if count == 1 else 'are'} {count} "
+                f"open alert{'s' if count != 1 else ''} on the dashboard."
+            )
         else:
             reply += " There are no open alerts."
 

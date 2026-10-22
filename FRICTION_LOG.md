@@ -156,3 +156,36 @@ person's newest check-in.
 
 **Suggestion:** Make timezone-aware UTC the documented default in SQLite
 examples, and show the conversion boundary in the MCP tool result schema.
+
+---
+
+## 6. `python-dotenv` - `.env` loaded in one process but not another
+
+**Tool/API/SDK:** `python-dotenv` 1.2.4 with `mcp_server.py`, `web_app.py` and
+`agent.py`
+
+**Task attempted:** Make AI mode switch on automatically when
+`ANTHROPIC_API_KEY` is added to `.env`.
+
+**Steps taken:**
+1. Added `load_dotenv()` where the data layer is imported, so the MCP server
+   saw `.env`.
+2. Added the key to `.env` and restarted the web app.
+3. `/api/health` still reported `agent_mode: "rules"`.
+
+**Expected:** Every process started from the project root sees the same `.env`.
+
+**Actual:** Only modules that imported `db.py` called `load_dotenv()`. The web
+app imports `agent.py` directly, so its `os.getenv()` calls ran before anything
+loaded `.env`. The key existed, but AI mode stayed off.
+
+**Severity:** Medium (a documented feature silently did not activate)
+
+**Workaround:** `agent.py` now calls `load_dotenv()` before reading its
+configuration, so the web app, the CLI and `demo.py` all get the same values.
+`test_client.py` loads it too for a custom `MCP_URL`.
+
+**Suggestion:** Make the "load once at the process entry point" rule explicit
+in the dotenv docs, or offer a typed settings helper that raises when a
+configuration key is present in `.env` but missing from the process
+environment.

@@ -222,7 +222,7 @@ expose them publicly without adding one.
 python -m unittest discover -s tests -v
 ```
 
-60 tests across the data layer, agent rules, AI-mode validation, MCP tools
+64 tests across the data layer, agent rules, AI-mode validation, MCP tools
 and seed data.
 Standard library only - no test dependency to install.
 
@@ -245,7 +245,34 @@ python test_client.py
 6. A late check-in recovers the missed alert.
 7. The final family status.
 
-Use `--fast` to shorten step 5, and `--reset` to reseed first.
+Use `--fast` for a 15-second schedule (about a 30-second wait), and `--reset`
+to reseed first.
+
+## Full run-through (Part 9)
+
+This is the same path the video follows. It takes about three minutes after the
+servers are up.
+
+1. Run `python seed.py --reset`, start both servers, and open
+   <http://127.0.0.1:8001>. The badges should read **MCP connected**,
+   **protocol 2026-07-28**, **5 MCP tools**, **rules mode** and **0 open
+   alerts**; all three people should be **ok**.
+2. Send **"I'm fine, just checking in"** for Elena. The reply appears, the
+   trace shows `log_checkin`, and her card updates.
+3. Send **"I'm fine, everything is great, but I need help"**. The trace shows
+   `escalate` then `log_checkin` with `status: "help"`, and a red alert appears.
+   Click **Resolve**.
+4. Keep Elena selected, click **15s demo**, and wait about 25 seconds. Her card
+   turns **missed** and a new alert appears. Send a routine check-in; the alert
+   closes and the card returns to **ok**.
+5. Open <http://127.0.0.1:8001/api/health> and confirm `mcp_status` is
+   `connected`, the protocol is `2026-07-28`, and `agent_mode` is `rules`.
+6. Run `python test_client.py`. It checks the protocol and all four required
+   tools, calls each one, and closes the alert it raises.
+
+If anything is off, `GET /health` on the MCP server (port 8000) reports the
+registered tools and protocol versions. Re-run `python seed.py --reset` to
+clear demo alerts and short schedules.
 
 ## HTTP API
 
@@ -274,7 +301,7 @@ checkin-relay/
 │   └── index.html   Family dashboard + voice simulator (no external assets)
 ├── tests/
 │   ├── test_db.py          22 data-layer tests
-│   ├── test_agent.py       28 agent rule and AI-mode tests
+│   ├── test_agent.py       32 agent rule and AI-mode tests
 │   ├── test_mcp_server.py   7 MCP tool tests
 │   └── test_seed.py         3 seed-data tests
 ├── requirements.txt

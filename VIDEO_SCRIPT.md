@@ -6,19 +6,21 @@ tabs, turn on Do Not Disturb, and hide any personal bookmarks.
 ## Before recording
 
 ```powershell
-# 1. Set GRACE_SECONDS=10 in .env, then restart the MCP server.
-# 2. Clean demo data:
+# 1. Clean demo data:
 python seed.py --reset
 
-# 3. Terminal 1
+# 2. Terminal 1
 python mcp_server.py
 
-# 4. Terminal 2
+# 3. Terminal 2
 python web_app.py
 
-# 5. Terminal 3, once, to show the protocol and tools on camera:
+# 4. Terminal 3, once, to show the protocol and tools on camera:
 python test_client.py
 ```
+
+The **15s demo** control sets its own 5-second grace window, so you do not need
+to change `GRACE_SECONDS` for the escalation shot.
 
 In the browser:
 

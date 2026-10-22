@@ -184,6 +184,60 @@ class SpeakerTests(unittest.TestCase):
         self.assertEqual(aliases["sam"], "Samuel Whitfield")
         self.assertNotIn("nana", aliases)
 
+    def test_alias_does_not_match_inside_another_word(self) -> None:
+        # "same" must not be read as the alias "sam" for Samuel.
+        self.assertIsNone(resolve_speaker("I'm fine, same as yesterday", ROSTER))
+
+
+class RulesModeTests(unittest.IsolatedAsyncioTestCase):
+    async def _agent(self, results: dict[str, dict]):
+        agent = CheckInAgent(llm_client=None)
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_roster(max_age: float = 15.0) -> list[dict]:
+            return ROSTER
+
+        async def fake_call(name: str, arguments: dict) -> dict:
+            calls.append((name, arguments))
+            return results.get(name, {})
+
+        agent.roster = fake_roster  # type: ignore[method-assign]
+        agent.call_tool = fake_call  # type: ignore[method-assign]
+        return agent, calls
+
+    async def test_typed_checkin_keeps_its_web_source(self) -> None:
+        agent, calls = await self._agent({"log_checkin": {"next_due": None}})
+        result = await agent.handle("I'm fine", speaker="Elena Whitfield", source="web")
+
+        self.assertEqual(calls[0][0], "log_checkin")
+        self.assertEqual(calls[0][1]["source"], "web")
+        self.assertEqual(result.tool_calls[0]["arguments"]["source"], "web")
+
+    async def test_typed_help_keeps_its_web_source(self) -> None:
+        agent, calls = await self._agent(
+            {"escalate": {"created": True, "alert_id": 3}, "log_checkin": {}}
+        )
+        await agent.handle("I need help", speaker="Elena Whitfield", source="web")
+
+        self.assertEqual([name for name, _ in calls], ["escalate", "log_checkin"])
+        self.assertEqual(calls[1][1]["source"], "web")
+
+    async def test_status_reply_has_correct_plural(self) -> None:
+        people = [
+            {"name": "Elena Whitfield", "state": "ok", "last_checkin": {"checked_at": "2026-10-23T10:00:00+00:00"}}
+        ]
+        for count, expected in (
+            (0, "There are no open alerts."),
+            (1, "There is 1 open alert on the dashboard."),
+            (2, "There are 2 open alerts on the dashboard."),
+        ):
+            with self.subTest(count=count):
+                agent, _ = await self._agent(
+                    {"get_status": {"people": people, "open_alerts": [{}] * count}}
+                )
+                result = await agent.handle("How is everyone?", speaker="Elena Whitfield")
+                self.assertIn(expected, result.reply)
+
 
 class _FakeMessages:
     def __init__(self, replies: list[dict]) -> None:
