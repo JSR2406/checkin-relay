@@ -52,10 +52,6 @@ class ResolveRequest(BaseModel):
     resolved_by: str = Field(default="family", max_length=120)
 
 
-class AgentUnavailable(Exception):
-    """Raised when the MCP server cannot be reached."""
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Connect the MCP client on startup and release it on shutdown."""
