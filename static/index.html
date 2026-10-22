@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check-in Relay - Family Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #171e26;
+    --panel-2: #1e2732;
+    --line: #2a3542;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #4c9aff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --danger: #f85149;
+    --critical: #ff7b72;
+    --radius: 12px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  a { color: var(--accent); }
+
+  header {
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #141b23, #0f1419);
+    padding: 18px 24px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .header-inner {
+    max-width: 1180px;
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  h1 { font-size: 19px; margin: 0; letter-spacing: .2px; }
+  h1 .tag { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 12px; }
+
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .badge {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .badge.good { color: var(--ok); border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.12); }
+  .badge.warn { color: var(--warn); border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.12); }
+  .badge.bad  { color: var(--danger); border-color: rgba(248,81,73,.4); background: rgba(248,81,73,.12); }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 22px 24px 60px; }
+
+  .grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin-bottom: 20px;
+  }
+
+  .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; }
+
+  .person {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--muted);
+    border-radius: 10px;
+    padding: 13px 14px;
+  }
+  .person.state-ok { border-left-color: var(--ok); }
+  .person.state-grace { border-left-color: var(--warn); }
+  .person.state-overdue, .person.state-missed { border-left-color: var(--danger); }
+  .person.state-help_requested { border-left-color: var(--critical); box-shadow: 0 0 0 1px rgba(255,123,114,.35); }
+
+  .person-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .person-name { font-weight: 600; font-size: 15px; }
+  .person-rel { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .person-line { color: var(--muted); font-size: 13px; margin-top: 7px; }
+  .person-quote { color: var(--text); font-size: 13px; margin-top: 3px; font-style: italic; }
+
+  .state {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap;
+  }
+  .state.s-ok { color: var(--ok); border-color: rgba(63,185,80,.45); }
+  .state.s-grace { color: var(--warn); border-color: rgba(210,153,34,.45); }
+  .state.s-overdue, .state.s-missed { color: var(--danger); border-color: rgba(248,81,73,.45); }
+  .state.s-help_requested { color: var(--critical); border-color: rgba(255,123,114,.6); background: rgba(255,123,114,.1); }
+  .state.s-never_checked_in { color: var(--muted); }
+
+  .alert {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--danger);
+    background: var(--panel-2);
+    border-radius: 9px;
+    padding: 11px 13px;
+    margin-bottom: 10px;
+  }
+  .alert.sev-critical { border-left-color: var(--critical); background: rgba(255,123,114,.07); }
+  .alert-title { font-weight: 600; font-size: 13px; }
+  .alert-msg { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .alert-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 9px; gap: 10px; }
+  .alert-time { color: var(--muted); font-size: 12px; }
+
+  button {
+    font: inherit; font-size: 13px; cursor: pointer;
+    background: var(--accent); color: #04121f; border: 0;
+    padding: 7px 14px; border-radius: 7px; font-weight: 600;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+  button.ghost:hover { color: var(--text); border-color: var(--accent); }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .06em; }
+
+  select, input[type=text], textarea {
+    width: 100%; font: inherit; font-size: 14px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+  }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .field { margin-bottom: 13px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row > * { flex: 1; }
+  .row > button { flex: 0 0 auto; }
+
+  .phrases { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+  .phrases button { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 500; padding: 5px 10px; font-size: 12px; }
+  .phrases button:hover { color: var(--text); border-color: var(--accent); }
+
+  .reply {
+    margin-top: 13px; padding: 12px 14px; border-radius: 9px;
+    background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .reply-text { font-size: 14px; }
+  .reply-meta { margin-top: 8px; font-size: 12px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .reply-meta code { background: rgba(76,154,255,.12); color: var(--accent); padding: 1px 5px; border-radius: 4px; }
+
+  .log { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow-y: auto; }
+  .log li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; display: flex; gap: 10px; }
+  .log li:last-child { border-bottom: 0; }
+  .log time { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .log .who { font-weight: 600; }
+  .log .what { color: var(--muted); }
+
+  .disclaimer {
+    border: 1px solid rgba(210,153,34,.35); background: rgba(210,153,34,.08);
+    color: #e3b341; border-radius: 9px; padding: 11px 14px; font-size: 13px; margin-bottom: 20px;
+  }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+  .err { color: var(--danger); font-size: 13px; margin-top: 8px; }
+  .updated { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>Check-in Relay <span class="tag">family wellbeing check-ins</span></h1>
+    <div class="badges" id="badges">
+      <span class="badge" id="badge-mcp">connecting to MCP...</span>
+      <span class="badge" id="badge-proto">protocol -</span>
+      <span class="badge" id="badge-tools">tools -</span>
+      <span class="badge" id="badge-alerts">- open alerts</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="disclaimer" id="disclaimer">
+    Check-in Relay is a wellbeing reminder, not a medical service, and it is not a
+    replacement for emergency services. Alerts appear on this dashboard only &mdash;
+    no SMS, phone call or push notification is sent.
+  </div>
+
+  <div class="grid">
+    <div>
+      <section class="panel">
+        <h2>Family</h2>
+        <div class="people" id="people"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Open alerts</h2>
+        <div id="alerts"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Recent activity</h2>
+        <ul class="log" id="log"></ul>
+      </section>
+    </div>
+
+    <div>
+      <section class="panel">
+        <h2>Voice simulator</h2>
+        <div class="field">
+          <label for="speaker">Who is speaking</label>
+          <select id="speaker"></select>
+        </div>
+        <div class="field">
+          <label for="utterance">What they said</label>
+          <input type="text" id="utterance" placeholder="I'm fine, just checking in" autocomplete="off">
+        </div>
+        <div class="row">
+          <button id="send">Speak</button>
+          <button class="ghost" id="clear">Clear</button>
+        </div>
+        <div class="phrases" id="phrases">
+          <button data-p="I'm fine, just checking in">routine check-in</button>
+          <button data-p="I'm fine, everything is great, but I need help">help request</button>
+          <button data-p="How is everyone?">status</button>
+          <button data-p="Remind me to check in every 30 minutes">schedule</button>
+          <button data-p="I fell down the stairs">accident</button>
+        </div>
+        <div class="reply" id="reply" hidden>
+          <div class="reply-text" id="reply-text"></div>
+          <div class="reply-meta" id="reply-meta"></div>
+        </div>
+        <div class="err" id="err" hidden></div>
+      </section>
+
+      <section class="panel">
+        <h2>Demo controls</h2>
+        <p class="updated" style="margin-top:0">
+          Simulate a missed check-in by giving someone a very short schedule, then
+          waiting for the grace window to pass. The MCP server raises the alert and
+          the dashboard picks it up on the next refresh.
+        </p>
+        <div class="field">
+          <label for="quick-person">Person</label>
+          <select id="quick-person"></select>
+        </div>
+        <div class="row">
+          <div class="field" style="margin:0">
+            <label for="quick-minutes">Check in every (minutes)</label>
+            <input type="text" id="quick-minutes" value="1">
+          </div>
+          <button id="quick-schedule" style="align-self:flex-end">Set schedule</button>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="ghost" id="refresh">Refresh now</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+/* Everything the server sends is treated as text and inserted with textContent,
+   never as HTML, so a check-in message can never inject markup. */
+
+const $ = (id) => document.getElementById(id);
+let speakers = [];
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function fmtTime(iso) {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function relative(iso) {
+  if (!iso) return "never";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return iso;
+  const secs = Math.round((Date.now() - then) / 1000);
+  if (secs < 60) return secs + "s ago";
+  if (secs < 3600) return Math.round(secs / 60) + "m ago";
+  if (secs < 86400) return Math.round(secs / 3600) + "h ago";
+  return Math.round(secs / 86400) + "d ago";
+}
+
+const STATE_LABEL = {
+  ok: "ok",
+  grace: "in grace",
+  overdue: "overdue",
+  missed: "missed check-in",
+  help_requested: "help requested",
+  never_checked_in: "no check-in yet",
+};
+
+function renderPeople(data) {
+  const host = $("people");
+  host.textContent = "";
+  const people = data.people || [];
+  if (!people.length) {
+    host.appendChild(el("div", "empty", "No family members yet. Run 'python seed.py' to add the demo family."));
+    return;
+  }
+  for (const person of people) {
+    const card = el("div", "person state-" + person.state);
+    const head = el("div", "person-head");
+    const left = el("div");
+    left.appendChild(el("div", "person-name", person.name));
+    left.appendChild(el("div", "person-rel", person.relation || "family"));
+    head.appendChild(left);
+    head.appendChild(el("span", "state s-" + person.state, STATE_LABEL[person.state] || person.state));
+    card.appendChild(head);
+
+    const last = person.last_checkin;
+    card.appendChild(el("div", "person-line", last
+      ? "Last check-in " + relative(last.checked_at) + " (" + fmtTime(last.checked_at) + ") - " + last.status
+      : "No check-in recorded"));
+    if (last && last.message) {
+      card.appendChild(el("div", "person-quote", "\u201c" + last.message + "\u201d"));
+    }
+    if (person.schedule && person.schedule.active) {
+      const s = person.schedule;
+      card.appendChild(el("div", "person-line",
+        "Next due " + fmtTime(s.next_due) + " (every " + Math.round(s.interval_seconds / 60) +
+        "m, grace " + s.grace_seconds + "s)"));
+    }
+    for (const alert of person.open_alerts || []) {
+      card.appendChild(el("div", "person-line", "\u26a0 " + alert.kind.replace(/_/g, " ") + ": " + alert.message));
+    }
+    host.appendChild(card);
+  }
+}
+
+function renderAlerts(data) {
+  const host = $("alerts");
+  host.textContent = "";
+  const alerts = data.open_alerts || [];
+  $("badge-alerts").textContent = alerts.length + " open alert" + (alerts.length === 1 ? "" : "s");
+  $("badge-alerts").className = "badge " + (alerts.length ? "bad" : "good");
+
+  if (!alerts.length) {
+    host.appendChild(el("div", "empty", "No open alerts. Everyone is on track."));
+    return;
+  }
+  for (const alert of alerts) {
+    const box = el("div", "alert sev-" + alert.severity);
+    box.appendChild(el("div", "alert-title", alert.person_name + " - " + alert.kind.replace(/_/g, " ")));
+    box.appendChild(el("div", "alert-msg", alert.message));
+    const foot = el("div", "alert-foot");
+    foot.appendChild(el("span", "alert-time", "raised " + fmtDateTime(alert.created_at)));
+    const btn = el("button", "ghost", "Resolve");
+    btn.addEventListener("click", () => resolveAlert(alert.id));
+    foot.appendChild(btn);
+    box.appendChild(foot);
+    host.appendChild(box);
+  }
+}
+
+function renderLog(data) {
+  const host = $("log");
+  host.textContent = "";
+  const checkins = data.recent_checkins || [];
+  if (!checkins.length) {
+    host.appendChild(el("li", "empty", "Nothing yet."));
+    return;
+  }
+  for (const c of checkins) {
+    const li = el("li");
+    li.appendChild(el("time", null, fmtTime(c.checked_at)));
+    const body = el("div");
+    body.appendChild(el("span", "who", c.person_name));
+    body.appendChild(el("span", "what",
+      " - " + c.status + " via " + c.source + (c.message ? ": \u201c" + c.message + "\u201d" : "")));
+    li.appendChild(body);
+    host.appendChild(li);
+  }
+}
+
+function renderSpeakers(people) {
+  const speakerSel = $("speaker");
+  const quickSel = $("quick-person");
+  const current = speakerSel.value;
+  speakerSel.textContent = "";
+  quickSel.textContent = "";
+  for (const person of people) {
+    const opt = el("option", null, person.name + " (" + (person.relation || "family") + ")");
+    opt.value = person.name;
+    speakerSel.appendChild(opt);
+    const opt2 = el("option", null, person.name);
+    opt2.value = person.name;
+    quickSel.appendChild(opt2);
+  }
+  if (current) speakerSel.value = current;
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("/api/status");
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || ("HTTP " + res.status));
+    renderPeople(body);
+    renderAlerts(body);
+    renderLog(body);
+    renderSpeakers(body.people || []);
+  } catch (err) {
+    $("badge-mcp").textContent = "MCP unavailable";
+    $("badge-mcp").className = "badge bad";
+    const errBox = $("err");
+    errBox.hidden = false;
+    errBox.textContent = "Could not load the dashboard: " + err.message;
+  }
+}
+
+async function refreshHealth() {
+  try {
+    const res = await fetch("/api/health");
+    const body = await res.json();
+    if (body.mcp_status === "connected") {
+      $("badge-mcp").textContent = "MCP connected";
+      $("badge-mcp").className = "badge good";
+      $("badge-proto").textContent = "protocol " + (body.protocol_version || "?");
+      $("badge-tools").textContent = (body.tools || []).length + " MCP tools";
+      if (body.disclaimer) $("disclaimer").textContent = body.disclaimer;
+    } else {
+      $("badge-mcp").textContent = "MCP unavailable";
+      $("badge-mcp").className = "badge bad";
+      $("badge-proto").textContent = "protocol -";
+      $("badge-tools").textContent = "tools -";
+    }
+  } catch (err) {
+    $("badge-mcp").textContent = "web app offline";
+    $("badge-mcp").className = "badge bad";
+  }
+}
+
+async function resolveAlert(id) {
+  try {
+    const res = await fetch("/api/alerts/" + encodeURIComponent(id) + "/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved_by: "family" }),
+    });
+    if (!res.ok) {
+      const body = await res.json();
+      throw new Error(body.detail || ("HTTP " + res.status));
+    }
+    await refresh();
+  } catch (err) {
+    const errBox = $("err");
+    errBox.hidden = false;
+    errBox.textContent = "Could not resolve the alert: " + err.message;
+  }
+}
+
+async function speak() {
+  const input = $("utterance");
+  const text = input.value.trim();
+  const errBox = $("err");
+  errBox.hidden = true;
+  if (!text) return;
+
+  const btn = $("send");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/checkin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text, speaker: $("speaker").value || null, source: "voice" }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || ("HTTP " + res.status));
+
+    $("reply").hidden = false;
+    $("reply-text").textContent = body.reply || "";
+    const meta = $("reply-meta");
+    meta.textContent = "";
+    meta.appendChild(el("code", null, body.intent));
+    meta.appendChild(document.createTextNode("  " + (body.tool_calls || []).map((c) => c.tool).join(" -> ")));
+    await refresh();
+  } catch (err) {
+    errBox.hidden = false;
+    errBox.textContent = "Could not send that: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function quickSchedule() {
+  const minutes = parseInt($("quick-minutes").value, 10);
+  const person = $("quick-person").value;
+  const errBox = $("err");
+  errBox.hidden = true;
+  if (!person || !minutes || minutes < 1) {
+    errBox.hidden = false;
+    errBox.textContent = "Pick a person and use a whole number of minutes (1 or more).";
+    return;
+  }
+  try {
+    const res = await fetch("/api/checkin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: "Please check in every " + minutes + " minutes",
+        speaker: person,
+        source: "dashboard",
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || ("HTTP " + res.status));
+    $("reply").hidden = false;
+    $("reply-text").textContent = body.reply || "";
+    await refresh();
+  } catch (err) {
+    errBox.hidden = false;
+    errBox.textContent = "Could not set the schedule: " + err.message;
+  }
+}
+
+$("send").addEventListener("click", speak);
+$("utterance").addEventListener("keydown", (e) => { if (e.key === "Enter") speak(); });
+$("clear").addEventListener("click", () => {
+  $("utterance").value = "";
+  $("reply").hidden = true;
+  $("err").hidden = true;
+});
+$("refresh").addEventListener("click", refresh);
+$("quick-schedule").addEventListener("click", quickSchedule);
+for (const button of document.querySelectorAll("#phrases button")) {
+  button.addEventListener("click", () => {
+    $("utterance").value = button.dataset.p;
+    speak();
+  });
+}
+
+refreshHealth();
+refresh();
+setInterval(refresh, 4000);
+setInterval(refreshHealth, 15000);
+</script>
+</body>
+</html>
