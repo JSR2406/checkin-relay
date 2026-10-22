@@ -229,9 +229,10 @@ def get_status(person: str | None = None) -> StatusResult:
     name="schedule_checkin",
     title="Schedule recurring check-ins",
     description=(
-        "Set or update how often a family member must check in. The schedule is "
-        "re-anchored to each successful check-in. A grace period allows a late "
-        "check-in without raising an alert."
+        "Set or update how often a family member must check in. "
+        "interval_minutes may be fractional (0.25 is 15 seconds), which is "
+        "handy for demos. The schedule is re-anchored to each successful "
+        "check-in. A grace period allows a late check-in without raising an alert."
     ),
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
@@ -239,15 +240,16 @@ def get_status(person: str | None = None) -> StatusResult:
 )
 def schedule_checkin(
     person: str,
-    interval_minutes: int = 60,
+    interval_minutes: float = 60,
     grace_seconds: int | None = None,
 ) -> ScheduleResult:
     """Create or update the check-in schedule for `person`."""
     if interval_minutes <= 0:
         raise ValueError("interval_minutes must be greater than zero")
+    interval_seconds = max(1, int(round(interval_minutes * 60)))
     row = db.set_schedule(
         person_name=person,
-        interval_seconds=interval_minutes * 60,
+        interval_seconds=interval_seconds,
         grace_seconds=grace_seconds,
     )
     return ScheduleResult(

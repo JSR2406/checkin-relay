@@ -52,10 +52,19 @@ class ResolveRequest(BaseModel):
     resolved_by: str = Field(default="family", max_length=120)
 
 
+class ScheduleRequest(BaseModel):
+    """A short schedule set from the dashboard demo controls."""
+
+    person: str = Field(min_length=1, max_length=120)
+    interval_seconds: int = Field(default=60, gt=0, le=7 * 24 * 3600)
+    grace_seconds: Optional[int] = Field(default=None, ge=0, le=600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Connect the MCP client on startup and release it on shutdown."""
     agent = CheckInAgent(MCP_URL)
+    print(f"[web] agent mode: {agent.mode}")
     app.state.agent = agent
     app.state.agent_lock = asyncio.Lock()
     try:
@@ -116,6 +125,7 @@ async def health() -> JSONResponse:
         "app": "check-in-relay-web",
         "mcp_url": MCP_URL,
         "disclaimer": DISCLAIMER,
+        "agent_mode": agent.mode,
     }
     try:
         async with app.state.agent_lock:
@@ -178,6 +188,24 @@ async def checkin(request: CheckinRequest) -> JSONResponse:
 async def resolve_alert(alert_id: int, request: ResolveRequest) -> JSONResponse:
     """Close an alert from the dashboard, through MCP."""
     data = await _call("resolve_alert", {"alert_id": alert_id, "resolved_by": request.resolved_by})
+    return JSONResponse(data)
+
+
+@app.post("/api/schedule")
+async def schedule(request: ScheduleRequest) -> JSONResponse:
+    """Set a short check-in interval for the demo, through MCP.
+
+    The dashboard controls speak in seconds so the escalation story can be
+    reproduced in under a minute; the MCP tool takes fractional minutes.
+    """
+    data = await _call(
+        "schedule_checkin",
+        {
+            "person": request.person,
+            "interval_minutes": request.interval_seconds / 60,
+            "grace_seconds": request.grace_seconds,
+        },
+    )
     return JSONResponse(data)
 
 

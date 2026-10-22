@@ -177,6 +177,28 @@
   .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
   .err { color: var(--danger); font-size: 13px; margin-top: 8px; }
   .updated { color: var(--muted); font-size: 12px; }
+
+  .mic.live { background: var(--danger); color: #fff; }
+  .mic-status { color: var(--warn); font-size: 13px; margin-top: 8px; }
+  .tts { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 12px; color: var(--muted); text-transform: none; letter-spacing: 0; }
+  .tts input { width: auto; }
+
+  .trace { margin-top: 10px; display: grid; gap: 5px; }
+  .trace-row {
+    display: flex; gap: 8px; align-items: baseline; font-size: 12px;
+    background: rgba(76,154,255,.08); border: 1px solid rgba(76,154,255,.25);
+    border-radius: 7px; padding: 6px 9px;
+  }
+  .trace-row code { color: var(--accent); font-weight: 600; }
+  .trace-row span { color: var(--muted); word-break: break-all; }
+
+  .log .evt-ok { color: var(--ok); }
+  .log .evt-warn { color: var(--warn); }
+  .log .evt-alert { color: var(--danger); }
+
+  button:focus-visible, select:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
 </style>
 </head>
 <body>
@@ -187,6 +209,7 @@
       <span class="badge" id="badge-mcp">connecting to MCP...</span>
       <span class="badge" id="badge-proto">protocol -</span>
       <span class="badge" id="badge-tools">tools -</span>
+      <span class="badge" id="badge-mode">rules mode</span>
       <span class="badge" id="badge-alerts">- open alerts</span>
     </div>
   </div>
@@ -208,7 +231,7 @@
 
       <section class="panel">
         <h2>Open alerts</h2>
-        <div id="alerts"></div>
+        <div id="alerts" role="status" aria-live="polite"></div>
       </section>
 
       <section class="panel">
@@ -229,29 +252,37 @@
           <input type="text" id="utterance" placeholder="I'm fine, just checking in" autocomplete="off">
         </div>
         <div class="row">
-          <button id="send">Speak</button>
-          <button class="ghost" id="clear">Clear</button>
+          <button id="send" type="button">Send</button>
+          <button class="ghost mic" id="mic" type="button" aria-pressed="false"
+                  title="Dictate with your microphone (Chrome or Edge)">&#127908; Talk</button>
+          <button class="ghost" id="clear" type="button">Clear</button>
         </div>
+        <div class="mic-status" id="mic-status" role="status" aria-live="polite" hidden></div>
+        <label class="tts" for="tts">
+          <input type="checkbox" id="tts" checked> Read the assistant's replies aloud
+        </label>
         <div class="phrases" id="phrases">
-          <button data-p="I'm fine, just checking in">routine check-in</button>
-          <button data-p="I'm fine, everything is great, but I need help">help request</button>
-          <button data-p="How is everyone?">status</button>
-          <button data-p="Remind me to check in every 30 minutes">schedule</button>
-          <button data-p="I fell down the stairs">accident</button>
+          <button type="button" data-p="I'm fine, just checking in">routine check-in</button>
+          <button type="button" data-p="I'm fine, everything is great, but I need help">help request</button>
+          <button type="button" data-p="How is everyone?">status</button>
+          <button type="button" data-p="Remind me to check in every 30 minutes">schedule</button>
+          <button type="button" data-p="Check on me in 15 seconds">15-second check-in</button>
+          <button type="button" data-p="I fell down the stairs">accident</button>
         </div>
-        <div class="reply" id="reply" hidden>
+        <div class="reply" id="reply" hidden aria-live="polite">
           <div class="reply-text" id="reply-text"></div>
           <div class="reply-meta" id="reply-meta"></div>
+          <div class="trace" id="trace" aria-label="MCP tool calls"></div>
         </div>
-        <div class="err" id="err" hidden></div>
+        <div class="err" id="err" hidden role="alert"></div>
       </section>
 
       <section class="panel">
         <h2>Demo controls</h2>
         <p class="updated" style="margin-top:0">
-          Simulate a missed check-in by giving someone a very short schedule, then
-          waiting for the grace window to pass. The MCP server raises the alert and
-          the dashboard picks it up on the next refresh.
+          Give someone a short check-in interval and grace window, then wait. The
+          MCP server's monitor raises the alert; the dashboard picks it up within
+          a few seconds. This is the fastest way to reproduce the escalation story.
         </p>
         <div class="field">
           <label for="quick-person">Person</label>
@@ -259,13 +290,22 @@
         </div>
         <div class="row">
           <div class="field" style="margin:0">
-            <label for="quick-minutes">Check in every (minutes)</label>
-            <input type="text" id="quick-minutes" value="1">
+            <label for="quick-seconds">Check in every (seconds)</label>
+            <input type="text" id="quick-seconds" value="15" inputmode="numeric">
           </div>
-          <button id="quick-schedule" style="align-self:flex-end">Set schedule</button>
+          <div class="field" style="margin:0">
+            <label for="quick-grace">Grace (seconds)</label>
+            <input type="text" id="quick-grace" value="5" inputmode="numeric">
+          </div>
+          <button id="quick-schedule" type="button" style="align-self:flex-end">Set</button>
+        </div>
+        <div class="phrases" style="margin-top:10px">
+          <button type="button" data-secs="15" data-grace="5">15s demo</button>
+          <button type="button" data-secs="30" data-grace="10">30s demo</button>
+          <button type="button" data-secs="60" data-grace="20">1m demo</button>
         </div>
         <div class="row" style="margin-top:12px">
-          <button class="ghost" id="refresh">Refresh now</button>
+          <button class="ghost" id="refresh" type="button">Refresh now</button>
         </div>
       </section>
     </div>
@@ -279,7 +319,37 @@
    never as HTML, so a check-in message can never inject markup. */
 
 const $ = (id) => document.getElementById(id);
-let speakers = [];
+
+let speakReplies = true;
+let listening = false;
+let recognizer = null;
+let inputWasSpeech = false;
+let lastRosterKey = "";
+
+const STATE_LABEL = {
+  ok: "ok",
+  grace: "in grace",
+  overdue: "overdue",
+  missed: "missed check-in",
+  help_requested: "help requested",
+  never_checked_in: "no check-in yet",
+};
+
+const EVENT_LABEL = {
+  alert_opened: "Alert opened",
+  alert_resolved: "Alert resolved",
+  missed_checkin: "Missed check-in",
+  schedule_set: "Schedule set",
+  escalation: "Help requested",
+};
+
+const MIC_ERRORS = {
+  "not-allowed": "Microphone permission was blocked. Allow it in the browser, or type instead.",
+  "service-not-allowed": "Speech recognition is blocked in this browser. Type instead.",
+  "audio-capture": "No microphone was found. Type instead.",
+  "no-speech": "I didn't hear anything. Try again, or type instead.",
+  "network": "Speech recognition needs a network connection. Type instead.",
+};
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -293,6 +363,13 @@ function fmtTime(iso) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtClock(iso) {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function fmtDateTime(iso) {
@@ -313,14 +390,34 @@ function relative(iso) {
   return Math.round(secs / 86400) + "d ago";
 }
 
-const STATE_LABEL = {
-  ok: "ok",
-  grace: "in grace",
-  overdue: "overdue",
-  missed: "missed check-in",
-  help_requested: "help requested",
-  never_checked_in: "no check-in yet",
-};
+function fmtInterval(seconds) {
+  if (!seconds && seconds !== 0) return "?";
+  if (seconds < 120) return seconds + "s";
+  if (seconds < 7200) return Math.round(seconds / 60) + "m";
+  return Math.round(seconds / 3600) + "h";
+}
+
+function short(text, limit) {
+  const value = String(text || "");
+  return value.length > limit ? value.slice(0, limit - 1) + "\u2026" : value;
+}
+
+function showError(message, source) {
+  const box = $("err");
+  box.hidden = false;
+  box.textContent = message;
+  box.dataset.source = source || "";
+}
+
+function clearError(source) {
+  const box = $("err");
+  if (source && box.dataset.source !== source) return;
+  box.hidden = true;
+  box.textContent = "";
+  delete box.dataset.source;
+}
+
+/* ---------------------------------------------------------------- render */
 
 function renderPeople(data) {
   const host = $("people");
@@ -345,16 +442,22 @@ function renderPeople(data) {
       ? "Last check-in " + relative(last.checked_at) + " (" + fmtTime(last.checked_at) + ") - " + last.status
       : "No check-in recorded"));
     if (last && last.message) {
-      card.appendChild(el("div", "person-quote", "\u201c" + last.message + "\u201d"));
+      card.appendChild(el("div", "person-quote", "\u201c" + short(last.message, 120) + "\u201d"));
     }
     if (person.schedule && person.schedule.active) {
       const s = person.schedule;
       card.appendChild(el("div", "person-line",
-        "Next due " + fmtTime(s.next_due) + " (every " + Math.round(s.interval_seconds / 60) +
-        "m, grace " + s.grace_seconds + "s)"));
+        "Next due " + fmtClock(s.next_due) + " (every " + fmtInterval(s.interval_seconds) +
+        ", grace " + s.grace_seconds + "s)"));
+      if (person.state === "grace" && s.grace_ends_at) {
+        card.appendChild(el("div", "person-line", "Grace ends " + fmtClock(s.grace_ends_at)));
+      }
+      if (person.state === "overdue") {
+        card.appendChild(el("div", "person-line", "Overdue - the MCP monitor will raise the alert"));
+      }
     }
     for (const alert of person.open_alerts || []) {
-      card.appendChild(el("div", "person-line", "\u26a0 " + alert.kind.replace(/_/g, " ") + ": " + alert.message));
+      card.appendChild(el("div", "person-line", "\u26a0 " + alert.kind.replace(/_/g, " ") + ": " + short(alert.message, 140)));
     }
     host.appendChild(card);
   }
@@ -364,8 +467,9 @@ function renderAlerts(data) {
   const host = $("alerts");
   host.textContent = "";
   const alerts = data.open_alerts || [];
-  $("badge-alerts").textContent = alerts.length + " open alert" + (alerts.length === 1 ? "" : "s");
-  $("badge-alerts").className = "badge " + (alerts.length ? "bad" : "good");
+  const badge = $("badge-alerts");
+  badge.textContent = alerts.length + " open alert" + (alerts.length === 1 ? "" : "s");
+  badge.className = "badge " + (alerts.length ? "bad" : "good");
 
   if (!alerts.length) {
     host.appendChild(el("div", "empty", "No open alerts. Everyone is on track."));
@@ -378,6 +482,7 @@ function renderAlerts(data) {
     const foot = el("div", "alert-foot");
     foot.appendChild(el("span", "alert-time", "raised " + fmtDateTime(alert.created_at)));
     const btn = el("button", "ghost", "Resolve");
+    btn.type = "button";
     btn.addEventListener("click", () => resolveAlert(alert.id));
     foot.appendChild(btn);
     box.appendChild(foot);
@@ -385,21 +490,46 @@ function renderAlerts(data) {
   }
 }
 
+/* Check-ins plus alert and schedule events, newest first. The check-ins give
+   the human story; the events show what the MCP server did about them. */
 function renderLog(data) {
   const host = $("log");
   host.textContent = "";
-  const checkins = data.recent_checkins || [];
-  if (!checkins.length) {
+  const rows = [];
+
+  for (const c of data.recent_checkins || []) {
+    rows.push({
+      at: c.checked_at,
+      cls: c.status === "help" ? "evt-alert" : "evt-ok",
+      who: c.person_name,
+      text: "checked in (" + c.status + " via " + c.source + ")" +
+        (c.message ? ': "' + short(c.message, 110) + '"' : ""),
+    });
+  }
+  for (const e of data.recent_events || []) {
+    const label = EVENT_LABEL[e.event_type];
+    if (!label) continue; // plain check-ins are already listed above
+    const detail = String(e.detail || "").replace(/^(help_request|missed_checkin):\s*/, "");
+    rows.push({
+      at: e.created_at,
+      cls: e.event_type === "alert_resolved" ? "evt-ok" : "evt-warn",
+      who: e.person_name || "System",
+      text: label + (detail ? ": " + short(detail, 110) : ""),
+    });
+  }
+
+  rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+  if (!rows.length) {
     host.appendChild(el("li", "empty", "Nothing yet."));
     return;
   }
-  for (const c of checkins) {
+  for (const row of rows.slice(0, 12)) {
     const li = el("li");
-    li.appendChild(el("time", null, fmtTime(c.checked_at)));
+    li.appendChild(el("time", null, fmtTime(row.at)));
     const body = el("div");
-    body.appendChild(el("span", "who", c.person_name));
-    body.appendChild(el("span", "what",
-      " - " + c.status + " via " + c.source + (c.message ? ": \u201c" + c.message + "\u201d" : "")));
+    body.appendChild(el("span", "who", row.who));
+    body.appendChild(el("span", "what", " - "));
+    body.appendChild(el("span", row.cls, row.text));
     li.appendChild(body);
     host.appendChild(li);
   }
@@ -408,9 +538,23 @@ function renderLog(data) {
 function renderSpeakers(people) {
   const speakerSel = $("speaker");
   const quickSel = $("quick-person");
-  const current = speakerSel.value;
+  const key = people.map((p) => p.name + "|" + (p.relation || "")).join(",");
+  if (key === lastRosterKey) return;
+  lastRosterKey = key;
+
+  const currentSpeaker = speakerSel.value;
+  const currentQuick = quickSel.value;
   speakerSel.textContent = "";
   quickSel.textContent = "";
+  if (!people.length) {
+    const opt = el("option", null, "No family loaded");
+    opt.value = "";
+    speakerSel.appendChild(opt);
+    const opt2 = el("option", null, "No family loaded");
+    opt2.value = "";
+    quickSel.appendChild(opt2);
+    return;
+  }
   for (const person of people) {
     const opt = el("option", null, person.name + " (" + (person.relation || "family") + ")");
     opt.value = person.name;
@@ -419,8 +563,24 @@ function renderSpeakers(people) {
     opt2.value = person.name;
     quickSel.appendChild(opt2);
   }
-  if (current) speakerSel.value = current;
+  if (currentSpeaker) speakerSel.value = currentSpeaker;
+  if (currentQuick) quickSel.value = currentQuick;
 }
+
+/* The visible proof that this is a real MCP integration: every tool the agent
+   called, with the arguments it passed over Streamable HTTP. */
+function renderTrace(calls) {
+  const host = $("trace");
+  host.textContent = "";
+  for (const call of calls || []) {
+    const row = el("div", "trace-row");
+    row.appendChild(el("code", null, call.tool || call.name || "tool"));
+    row.appendChild(el("span", null, JSON.stringify(call.arguments || call.args || {})));
+    host.appendChild(row);
+  }
+}
+
+/* ---------------------------------------------------------------- data */
 
 async function refresh() {
   try {
@@ -431,12 +591,13 @@ async function refresh() {
     renderAlerts(body);
     renderLog(body);
     renderSpeakers(body.people || []);
+    clearError("dashboard");
+    $("badge-mcp").textContent = "MCP connected";
+    $("badge-mcp").className = "badge good";
   } catch (err) {
     $("badge-mcp").textContent = "MCP unavailable";
     $("badge-mcp").className = "badge bad";
-    const errBox = $("err");
-    errBox.hidden = false;
-    errBox.textContent = "Could not load the dashboard: " + err.message;
+    showError("Could not load the dashboard: " + err.message, "dashboard");
   }
 }
 
@@ -449,6 +610,9 @@ async function refreshHealth() {
       $("badge-mcp").className = "badge good";
       $("badge-proto").textContent = "protocol " + (body.protocol_version || "?");
       $("badge-tools").textContent = (body.tools || []).length + " MCP tools";
+      const mode = body.agent_mode === "llm" ? "llm" : "rules";
+      $("badge-mode").textContent = mode + " mode";
+      $("badge-mode").className = "badge" + (mode === "llm" ? " good" : "");
       if (body.disclaimer) $("disclaimer").textContent = body.disclaimer;
     } else {
       $("badge-mcp").textContent = "MCP unavailable";
@@ -463,6 +627,7 @@ async function refreshHealth() {
 }
 
 async function resolveAlert(id) {
+  clearError();
   try {
     const res = await fetch("/api/alerts/" + encodeURIComponent(id) + "/resolve", {
       method: "POST",
@@ -475,18 +640,107 @@ async function resolveAlert(id) {
     }
     await refresh();
   } catch (err) {
-    const errBox = $("err");
-    errBox.hidden = false;
-    errBox.textContent = "Could not resolve the alert: " + err.message;
+    showError("Could not resolve the alert: " + err.message, "action");
   }
 }
+
+/* ---------------------------------------------------------------- voice */
+
+function say(text) {
+  if (!speakReplies || !window.speechSynthesis || !text) return;
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-IN";
+    utterance.rate = 1.02;
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    /* speech output is a nicety; never block the demo on it */
+  }
+}
+
+function setMicStatus(message) {
+  const box = $("mic-status");
+  box.hidden = !message;
+  box.textContent = message || "";
+}
+
+function startListening() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const mic = $("mic");
+  if (!SR) {
+    setMicStatus("Voice input needs Chrome or Edge. Typing always works.");
+    return;
+  }
+  if (listening && recognizer) {
+    try { recognizer.stop(); } catch (err) { /* already stopping */ }
+    return;
+  }
+
+  recognizer = new SR();
+  recognizer.lang = "en-IN";
+  recognizer.interimResults = true;
+  recognizer.continuous = false;
+  recognizer.maxAlternatives = 1;
+  let finalText = "";
+
+  recognizer.onstart = () => {
+    listening = true;
+    mic.classList.add("live");
+    mic.setAttribute("aria-pressed", "true");
+    mic.textContent = "Stop";
+    setMicStatus("Listening\u2026 speak now.");
+    clearError();
+  };
+
+  recognizer.onresult = (event) => {
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalText += transcript;
+      else interim += transcript;
+    }
+    $("utterance").value = (finalText + " " + interim).trim();
+  };
+
+  recognizer.onerror = (event) => {
+    const message = MIC_ERRORS[event.error];
+    setMicStatus(message || ("Voice input failed (" + event.error + "). Type instead."));
+  };
+
+  recognizer.onend = () => {
+    listening = false;
+    mic.classList.remove("live");
+    mic.setAttribute("aria-pressed", "false");
+    mic.innerHTML = "&#127908; Talk";
+    if (finalText.trim()) {
+      inputWasSpeech = true;
+      $("utterance").value = finalText.trim();
+      setMicStatus("Heard you. Sending\u2026");
+      speak();
+    } else if (!$("mic-status").hidden && $("mic-status").textContent.indexOf("Listening") === 0) {
+      setMicStatus("I didn't catch that. Try again, or type instead.");
+    }
+  };
+
+  try {
+    recognizer.start();
+  } catch (err) {
+    setMicStatus("Could not start the microphone: " + err.message);
+  }
+}
+
+/* ---------------------------------------------------------------- actions */
 
 async function speak() {
   const input = $("utterance");
   const text = input.value.trim();
-  const errBox = $("err");
-  errBox.hidden = true;
+  clearError();
+  setMicStatus("");
   if (!text) return;
+
+  const source = inputWasSpeech ? "voice" : "web";
+  inputWasSpeech = false;
 
   const btn = $("send");
   btn.disabled = true;
@@ -494,7 +748,7 @@ async function speak() {
     const res = await fetch("/api/checkin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text, speaker: $("speaker").value || null, source: "voice" }),
+      body: JSON.stringify({ text: text, speaker: $("speaker").value || null, source: source }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || ("HTTP " + res.status));
@@ -504,66 +758,109 @@ async function speak() {
     const meta = $("reply-meta");
     meta.textContent = "";
     meta.appendChild(el("code", null, body.intent));
-    meta.appendChild(document.createTextNode("  " + (body.tool_calls || []).map((c) => c.tool).join(" -> ")));
+    meta.appendChild(document.createTextNode(
+      "  speaker: " + (body.speaker || "unknown") +
+      "  mode: " + (body.mode || "rules") +
+      (body.needs_clarification ? "  (needs clarification)" : "")
+    ));
+    renderTrace(body.tool_calls);
+    say(body.reply || "");
     await refresh();
   } catch (err) {
-    errBox.hidden = false;
-    errBox.textContent = "Could not send that: " + err.message;
+    showError("Could not send that: " + err.message, "action");
   } finally {
     btn.disabled = false;
   }
 }
 
-async function quickSchedule() {
-  const minutes = parseInt($("quick-minutes").value, 10);
+async function quickSchedule(seconds, grace) {
   const person = $("quick-person").value;
-  const errBox = $("err");
-  errBox.hidden = true;
-  if (!person || !minutes || minutes < 1) {
-    errBox.hidden = false;
-    errBox.textContent = "Pick a person and use a whole number of minutes (1 or more).";
+  const secs = seconds === undefined ? parseInt($("quick-seconds").value, 10) : seconds;
+  const graceSecs = grace === undefined ? parseInt($("quick-grace").value, 10) : grace;
+  clearError();
+  setMicStatus("");
+
+  if (!person) {
+    showError("Pick a person first.", "action");
     return;
   }
+  if (!Number.isFinite(secs) || secs < 1 || secs > 86400) {
+    showError("Interval must be a whole number of seconds between 1 and 86400.", "action");
+    return;
+  }
+  if (!Number.isFinite(graceSecs) || graceSecs < 0 || graceSecs > 600) {
+    showError("Grace must be a whole number of seconds between 0 and 600.", "action");
+    return;
+  }
+
+  $("quick-seconds").value = String(secs);
+  $("quick-grace").value = String(graceSecs);
+
   try {
-    const res = await fetch("/api/checkin", {
+    const res = await fetch("/api/schedule", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: "Please check in every " + minutes + " minutes",
-        speaker: person,
-        source: "dashboard",
-      }),
+      body: JSON.stringify({ person: person, interval_seconds: secs, grace_seconds: graceSecs }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || ("HTTP " + res.status));
+
     $("reply").hidden = false;
-    $("reply-text").textContent = body.reply || "";
+    $("reply-text").textContent =
+      "Schedule set: " + person + " checks in every " + secs + "s with a " +
+      graceSecs + "s grace window. Next due at " + fmtClock(body.next_due) + ".";
+    const meta = $("reply-meta");
+    meta.textContent = "";
+    meta.appendChild(el("code", null, "schedule_checkin"));
+    meta.appendChild(document.createTextNode("  speaker: " + person));
+    renderTrace([{
+      tool: "schedule_checkin",
+      arguments: { person: person, interval_minutes: secs / 60, grace_seconds: graceSecs },
+    }]);
+    say("Okay " + person.split(" ")[0] + ", I'll check in with you in " + secs + " seconds.");
     await refresh();
   } catch (err) {
-    errBox.hidden = false;
-    errBox.textContent = "Could not set the schedule: " + err.message;
+    showError("Could not set the schedule: " + err.message, "action");
   }
 }
 
+/* ---------------------------------------------------------------- wiring */
+
 $("send").addEventListener("click", speak);
-$("utterance").addEventListener("keydown", (e) => { if (e.key === "Enter") speak(); });
+$("mic").addEventListener("click", startListening);
+$("utterance").addEventListener("keydown", (event) => { if (event.key === "Enter") speak(); });
 $("clear").addEventListener("click", () => {
   $("utterance").value = "";
   $("reply").hidden = true;
-  $("err").hidden = true;
+  $("trace").textContent = "";
+  setMicStatus("");
+  clearError();
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  if (listening && recognizer) {
+    try { recognizer.abort(); } catch (err) { /* already stopped */ }
+  }
+});
+$("tts").addEventListener("change", (event) => {
+  speakReplies = event.target.checked;
+  if (!speakReplies && window.speechSynthesis) window.speechSynthesis.cancel();
 });
 $("refresh").addEventListener("click", refresh);
-$("quick-schedule").addEventListener("click", quickSchedule);
-for (const button of document.querySelectorAll("#phrases button")) {
+$("quick-schedule").addEventListener("click", () => quickSchedule());
+for (const button of document.querySelectorAll("#phrases button[data-p]")) {
   button.addEventListener("click", () => {
     $("utterance").value = button.dataset.p;
     speak();
   });
 }
+for (const button of document.querySelectorAll(".phrases button[data-secs]")) {
+  button.addEventListener("click", () => {
+    quickSchedule(parseInt(button.dataset.secs, 10), parseInt(button.dataset.grace, 10));
+  });
+}
 
 refreshHealth();
 refresh();
-setInterval(refresh, 4000);
+setInterval(refresh, 2500);
 setInterval(refreshHealth, 15000);
 </script>
 </body>

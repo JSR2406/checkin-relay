@@ -18,6 +18,10 @@ env/
 *.sqlite
 *.sqlite3
 
+# Local run artifacts
+*.log
+*.pid
+
 # Tooling
 .pytest_cache/
 .mypy_cache/

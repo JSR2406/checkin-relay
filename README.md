@@ -19,11 +19,13 @@ All people, check-ins and notes in this project are fictional demo data.
 
 | Capability | How |
 | --- | --- |
-| Voice or text check-ins | A browser voice simulator; the agent turns speech into MCP tool calls |
-| Check-in scheduling | Per-person interval plus a grace window for late check-ins |
+| Voice or text check-ins | Browser microphone (Web Speech API) or typed text; the agent turns either into MCP tool calls |
+| Spoken replies | Optional text-to-speech read-back of the agent's answer (toggle in the UI) |
+| Visible MCP trace | Every tool call and its arguments is shown under the reply |
+| Check-in scheduling | Per-person interval plus a grace window, with 15s/30s/1m demo presets |
 | Missed check-in detection | A monitor inside the MCP server scans the schedules continuously |
 | Immediate help alerts | An explicit request for help always wins over upbeat wording |
-| Family dashboard | Live status, open alerts, and one-click alert resolution |
+| Family dashboard | Live status, open alerts, one-click alert resolution, and an activity feed |
 
 ## Architecture
 
@@ -65,7 +67,7 @@ interoperates with clients that do not speak the modern envelope.
 | --- | --- | --- |
 | `log_checkin` | `person`, `status` (`ok`/`help`), `message`, `mood`, `source` | Records a check-in and clears any missed-check-in alert it recovers from |
 | `get_status` | `person` (optional) | Reads the family dashboard snapshot: everyone, their schedule, open alerts, recent activity |
-| `schedule_checkin` | `person`, `interval_minutes`, `grace_seconds` | Creates or updates a recurring check-in schedule |
+| `schedule_checkin` | `person`, `interval_minutes`, `grace_seconds` | Creates or updates a recurring check-in schedule. `interval_minutes` accepts fractions, so `0.25` is a 15-second demo interval |
 | `escalate` | `person`, `reason` | Opens a critical help-request alert |
 | `resolve_alert` | `alert_id`, `resolved_by` | Closes an alert from the dashboard |
 
@@ -76,6 +78,36 @@ are unchanged.
 
 The server also exposes `GET /health` outside the MCP protocol, which reports
 the negotiated protocol versions and the registered tools.
+
+## AI mode (optional)
+
+The agent is rule-based by default and needs no API key. Set
+`ANTHROPIC_API_KEY` in `.env` and install `anthropic` to let a model choose the
+MCP tools instead:
+
+```powershell
+python -m pip install anthropic
+# .env
+# ANTHROPIC_API_KEY=your-key
+# ANTHROPIC_MODEL=claude-sonnet-5-5
+```
+
+Restart the web app; `/api/health` and the dashboard report `llm mode`, and
+every `/api/checkin` response includes `"mode": "llm"`. To use Amazon Bedrock,
+install `"anthropic[bedrock]"` and set `USE_BEDROCK=1`, `AWS_REGION` and
+`BEDROCK_MODEL_ID` instead.
+
+AI mode keeps the same guardrails as the rules:
+
+- An explicit request for help is handled by the rules **before** the model is
+  called, so upbeat wording can never downgrade it.
+- Every model tool call is validated against the real family roster and the
+  same interval/grace limits before anything executes.
+- A missing package, bad key or model error falls back to the rules and logs
+  the reason instead of breaking the demo.
+
+AI mode is optional. The rules path is the one that is fully exercised by the
+test suite and the demo video.
 
 ## Safety design
 
@@ -104,7 +136,8 @@ These are the rules the implementation enforces, each one covered by a test.
 ## Requirements
 
 - Python 3.11 or newer (3.10 also works)
-- No API keys, no cloud account, no Node.js required
+- No API keys, cloud account or Node.js required for the default rules mode
+- Optional: an Anthropic key or AWS Bedrock access for AI mode
 
 ## Setup
 
@@ -175,6 +208,11 @@ python demo.py
 Then open **<http://127.0.0.1:8001>** for the family dashboard and the voice
 simulator.
 
+Voice input uses the browser's Web Speech API (Chrome or Edge). Typing, the
+quick phrases and the demo controls work in any browser; when speech
+recognition is unavailable the microphone button says so instead of failing
+silently.
+
 Both servers bind to `127.0.0.1` only. They have no authentication, so do not
 expose them publicly without adding one.
 
@@ -184,7 +222,9 @@ expose them publicly without adding one.
 python -m unittest discover -s tests -v
 ```
 
-40 tests, standard library only - no test dependency to install.
+60 tests across the data layer, agent rules, AI-mode validation, MCP tools
+and seed data.
+Standard library only - no test dependency to install.
 
 With the MCP server running, the client smoke test verifies the negotiated
 protocol version and calls all four required tools:
@@ -216,6 +256,7 @@ Use `--fast` to shorten step 5, and `--reset` to reseed first.
 | `GET` | `/api/status` | The full dashboard snapshot (via `get_status`) |
 | `GET` | `/api/people` | The family roster for the speaker picker |
 | `POST` | `/api/checkin` | `{"text", "speaker", "source"}` - speak, and the agent calls MCP |
+| `POST` | `/api/schedule` | `{"person", "interval_seconds", "grace_seconds"}` - set a schedule for the demo controls (via `schedule_checkin`) |
 | `POST` | `/api/alerts/{id}/resolve` | `{"resolved_by"}` - close an alert (via `resolve_alert`) |
 
 ## Project layout
@@ -225,18 +266,23 @@ checkin-relay/
 ├── db.py            SQLite data layer (WAL, transactions, alert de-duplication)
 ├── seed.py          Fictional demo data
 ├── mcp_server.py    MCP server, 5 tools, missed-check-in monitor, /health
-├── agent.py         MCP client, intent rules, speaker resolution
+├── agent.py         MCP client, intent rules, speaker resolution, optional AI mode
 ├── web_app.py       FastAPI app, REST endpoints, error handling
 ├── demo.py          Scripted end-to-end demo
 ├── test_client.py   MCP smoke test (protocol version + all four tools)
 ├── static/
 │   └── index.html   Family dashboard + voice simulator (no external assets)
 ├── tests/
-│   ├── test_db.py   22 data-layer tests
-│   └── test_agent.py 18 agent rule tests
+│   ├── test_db.py          22 data-layer tests
+│   ├── test_agent.py       28 agent rule and AI-mode tests
+│   ├── test_mcp_server.py   7 MCP tool tests
+│   └── test_seed.py         3 seed-data tests
 ├── requirements.txt
 ├── .env.example
 ├── PRODUCT_FEEDBACK.md   required submission artifact
+├── FRICTION_LOG.md       optional judging-bonus artifact
+├── SUBMISSION.md         Devpost copy and checklist
+├── VIDEO_SCRIPT.md       timed demo script
 └── LICENSE               MIT
 ```
 
@@ -250,4 +296,7 @@ exposes it only on localhost.
 ## Tool feedback
 
 Feedback on every tool, API and SDK used is in
-[PRODUCT_FEEDBACK.md](PRODUCT_FEEDBACK.md), as the hackathon requires.
+[PRODUCT_FEEDBACK.md](PRODUCT_FEEDBACK.md), as the hackathon requires. The
+build-time issues and workarounds are in [FRICTION_LOG.md](FRICTION_LOG.md).
+[SUBMISSION.md](SUBMISSION.md) has the Devpost copy and checklist, and
+[VIDEO_SCRIPT.md](VIDEO_SCRIPT.md) has the timed demo script.

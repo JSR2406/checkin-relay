@@ -4,8 +4,16 @@ The agent is an MCP client. It connects to the Check-in Relay MCP server over
 Streamable HTTP, works out what the speaker meant, and calls the matching MCP
 tool.
 
-It is deliberately rule-based so the demo has no external API dependency and
-no key to lose. The rule set below is the safety-critical part:
+It has two modes:
+
+* **Rules** (default) - keyword rules with no external API dependency and no
+  key to lose.
+* **AI** (optional) - when ``ANTHROPIC_API_KEY`` (or AWS Bedrock credentials)
+  are present, a language model sees the MCP tool list and chooses the tools.
+  If the key is missing, the package is not installed, or the model call fails,
+  the agent falls back to the rules.
+
+The safety-critical rule is enforced in *both* modes before the model runs:
 
     An explicit request for help always wins.
 
@@ -26,11 +34,20 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Optional
 
 from mcp.client import Client
 
 MCP_URL = os.getenv("MCP_URL", "http://127.0.0.1:8000/mcp")
+
+# Optional AI mode (Part 10 of the build guide). Nothing here runs unless a
+# key is configured; the rules stay the default and the fallback.
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+USE_BEDROCK = os.getenv("USE_BEDROCK", "").strip().lower() in {"1", "true", "yes"}
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "").strip()
 
 # --------------------------------------------------------------------------
 # Rule sets
@@ -131,6 +148,8 @@ SCHEDULE_PATTERNS: tuple[str, ...] = (
     r"\beach morning\b",
     r"\beach evening\b",
     r"\bcheck in at\b",
+    r"\bcheck on me\b",
+    r"\bin \d+(?:\.\d+)?\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b",
     r"\bset a timer\b",
     r"\bhow often\b",
 )
@@ -159,6 +178,115 @@ MINUTE_UNITS = {"minute": 1, "minutes": 1, "min": 1, "mins": 1}
 HOUR_UNITS = {"hour": 60, "hours": 60, "hr": 60, "hrs": 60}
 DAY_UNITS = {"day": 1440, "days": 1440}
 
+# The four tools from the brief, described for the model. Keep this list in
+# sync with mcp_server.py; tests/test_mcp_server.py guards the registration.
+LLM_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "name": "log_checkin",
+        "description": (
+            "Record that a person has checked in. Use status 'ok' for a routine "
+            "check-in and 'help' only when they asked for help."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "person": {"type": "string", "description": "Exact family member name."},
+                "status": {"type": "string", "enum": ["ok", "help"]},
+                "message": {"type": "string", "description": "What the person said."},
+                "mood": {"type": "string", "enum": ["good", "okay", "low", "unspecified"]},
+                "source": {"type": "string", "enum": ["voice", "web", "seed"]},
+            },
+            "required": ["person", "status", "message"],
+        },
+    },
+    {
+        "name": "get_status",
+        "description": (
+            "Read the family dashboard: every person's state, schedule, last "
+            "check-in and the open alerts."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "person": {"type": "string", "description": "Optional exact name."}
+            },
+        },
+    },
+    {
+        "name": "schedule_checkin",
+        "description": (
+            "Create or replace a recurring check-in schedule. interval_minutes "
+            "may be fractional: 0.25 means every 15 seconds."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "person": {"type": "string", "description": "Exact family member name."},
+                "interval_minutes": {
+                    "type": "number",
+                    "description": "Greater than zero; fractions are allowed.",
+                },
+                "grace_seconds": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 600,
+                    "description": "Optional grace window before an alert.",
+                },
+            },
+            "required": ["person", "interval_minutes"],
+        },
+    },
+    {
+        "name": "escalate",
+        "description": (
+            "Raise a critical help-request alert on the family dashboard. Use "
+            "this whenever the person asks for help or describes an emergency."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "person": {"type": "string", "description": "Exact family member name."},
+                "reason": {"type": "string", "description": "Short reason for the family."},
+            },
+            "required": ["person", "reason"],
+        },
+    },
+]
+
+ALLOWED_LLM_TOOLS = {schema["name"] for schema in LLM_TOOL_SCHEMAS}
+
+
+def build_llm_client() -> Any:
+    """Create an Anthropic or Bedrock client, or return ``None``.
+
+    AI mode is strictly opt-in: without a key this returns ``None`` and the
+    agent keeps using the rules. A missing ``anthropic`` package is reported
+    once and also falls back instead of breaking the demo.
+    """
+    if not (ANTHROPIC_API_KEY or USE_BEDROCK):
+        return None
+    try:
+        if USE_BEDROCK:
+            from anthropic import AnthropicBedrock
+
+            return AnthropicBedrock(aws_region=AWS_REGION)
+        from anthropic import Anthropic
+
+        return Anthropic(api_key=ANTHROPIC_API_KEY)
+    except Exception as exc:  # package missing or bad credentials setup
+        print(
+            f"[agent] AI mode is configured but unavailable ({exc}); using rules.",
+            file=sys.stderr,
+        )
+        return None
+
+
+def llm_model_name() -> str:
+    """The model ID for the active provider."""
+    if USE_BEDROCK and BEDROCK_MODEL_ID:
+        return BEDROCK_MODEL_ID
+    return ANTHROPIC_MODEL
+
 
 # --------------------------------------------------------------------------
 # Result type
@@ -173,6 +301,7 @@ class AgentResult:
     data: Optional[dict[str, Any]] = None
     speaker: Optional[str] = None
     needs_clarification: bool = False
+    mode: str = "rules"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -182,6 +311,7 @@ class AgentResult:
             "data": self.data,
             "speaker": self.speaker,
             "needs_clarification": self.needs_clarification,
+            "mode": self.mode,
         }
 
 
@@ -239,9 +369,17 @@ def detect_mood(utterance: str) -> str:
     return "unspecified"
 
 
-def parse_interval_minutes(utterance: str) -> Optional[int]:
-    """Pull a check-in interval out of something like 'every 30 minutes'."""
+def parse_interval_minutes(utterance: str) -> Optional[float]:
+    """Pull a check-in interval out of something like 'every 30 minutes'.
+
+    Fractions and seconds are supported so the demo can use a 15-second
+    interval: 'check on me in 15 seconds' returns 0.25.
+    """
     text = utterance.lower()
+
+    match = re.search(r"\b(?:every|in)\s+(\d+(?:\.\d+)?)\s*(seconds?|secs?)\b", text)
+    if match:
+        return round(float(match.group(1)) / 60, 4)
 
     if re.search(r"\bevery\s+(few\s+)?(hour|hours|hr|hrs)\b", text):
         return 60
@@ -252,9 +390,12 @@ def parse_interval_minutes(utterance: str) -> Optional[int]:
     if re.search(r"\b(weekly|every\s+week)\b", text):
         return 10080
 
-    match = re.search(r"\bevery\s+(\d+)\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\b", text)
+    match = re.search(
+        r"\bevery\s+(\d+(?:\.\d+)?)\s*(minute|minutes|min|mins|hour|hours|hr|hrs)\b",
+        text,
+    )
     if match:
-        amount = int(match.group(1))
+        amount = float(match.group(1))
         unit = match.group(2)
         if unit in MINUTE_UNITS:
             return amount
@@ -263,15 +404,37 @@ def parse_interval_minutes(utterance: str) -> Optional[int]:
         if unit in DAY_UNITS:
             return amount * 1440
 
-    match = re.search(r"\b(\d+)\s*(minutes|minute|mins|min|hours|hour|hrs|hr)\b", text)
+    match = re.search(
+        r"\b(\d+(?:\.\d+)?)\s*(minutes|minute|mins|min|hours|hour|hrs|hr)\b", text
+    )
     if match:
-        amount = int(match.group(1))
+        amount = float(match.group(1))
         unit = match.group(2)
         if unit in MINUTE_UNITS:
             return amount
         if unit in HOUR_UNITS:
             return amount * 60
     return None
+
+
+def format_interval(minutes: float) -> str:
+    """Human wording for an interval: 0.25 -> '15 seconds'."""
+    seconds = int(round(minutes * 60))
+    if seconds < 120:
+        return f"{seconds} seconds"
+    if minutes < 120:
+        return f"{int(round(minutes))} minutes"
+    return f"{minutes / 60:.1f} hours"
+
+
+def format_due(value: Optional[str]) -> str:
+    """Show an ISO due time as a local clock time for the spoken reply."""
+    if not value:
+        return "soon"
+    try:
+        return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
+    except (TypeError, ValueError):
+        return value
 
 
 # --------------------------------------------------------------------------
@@ -344,16 +507,150 @@ def resolve_speaker(
 
 
 # --------------------------------------------------------------------------
+# AI mode: validate what the model asked for before calling anything
+# --------------------------------------------------------------------------
+def _canonical_person(
+    value: Any, roster: list[dict[str, Any]], speaker: Optional[str]
+) -> str:
+    """Resolve a model-supplied name against the real roster, never a guess."""
+    names = {
+        person.get("name", "").lower(): person.get("name", "")
+        for person in roster
+        if person.get("name")
+    }
+    if isinstance(value, str) and value.strip():
+        canonical = names.get(value.strip().lower())
+        if canonical:
+            return canonical
+        raise ValueError(f"unknown family member: {value!r}")
+    if speaker:
+        return speaker
+    raise ValueError("the model did not say who the tool call is for")
+
+
+def normalise_llm_input(
+    name: str,
+    arguments: Any,
+    roster: list[dict[str, Any]],
+    speaker: Optional[str],
+    source: str = "voice",
+) -> dict[str, Any]:
+    """Validate and normalise one model tool call.
+
+    Raises ``ValueError`` for anything the rules would not accept. The caller
+    validates every tool call in a turn before executing any of them, so a bad
+    second call cannot leave a half-applied action behind.
+    """
+    if name not in ALLOWED_LLM_TOOLS:
+        raise ValueError(f"tool is not available: {name!r}")
+    if not isinstance(arguments, dict):
+        raise ValueError("tool arguments must be an object")
+
+    if name == "get_status":
+        person = arguments.get("person")
+        return {} if person in (None, "") else {"person": _canonical_person(person, roster, None)}
+
+    if name == "escalate":
+        reason = str(arguments.get("reason") or "").strip()
+        if not reason:
+            raise ValueError("escalate needs a reason")
+        return {
+            "person": _canonical_person(arguments.get("person"), roster, speaker),
+            "reason": reason[:500],
+        }
+
+    if name == "log_checkin":
+        status = str(arguments.get("status") or "ok").lower()
+        if status not in {"ok", "help"}:
+            raise ValueError(f"invalid check-in status: {status!r}")
+        message = str(arguments.get("message") or "").strip()
+        if not message:
+            raise ValueError("log_checkin needs a message")
+        mood = str(arguments.get("mood") or "unspecified").lower()
+        if mood not in MOOD_KEYWORDS and mood != "unspecified":
+            mood = "unspecified"
+        return {
+            "person": _canonical_person(arguments.get("person"), roster, speaker),
+            "status": status,
+            "message": message[:2000],
+            "mood": mood,
+            "source": source if source in {"voice", "web"} else "voice",
+        }
+
+    # schedule_checkin
+    try:
+        minutes = float(arguments.get("interval_minutes"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("interval_minutes must be a number") from exc
+    if not (0 < minutes <= 10080):
+        raise ValueError("interval_minutes must be between 0 and 10080")
+    call: dict[str, Any] = {
+        "person": _canonical_person(arguments.get("person"), roster, speaker),
+        "interval_minutes": minutes,
+    }
+    grace = arguments.get("grace_seconds")
+    if grace is not None:
+        try:
+            grace_int = int(grace)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("grace_seconds must be an integer") from exc
+        if not (0 <= grace_int <= 600):
+            raise ValueError("grace_seconds must be between 0 and 600")
+        call["grace_seconds"] = grace_int
+    return call
+
+
+def intent_for_tool_calls(calls: list[dict[str, Any]]) -> str:
+    """Label a model turn with the same intent names the rules mode uses."""
+    names = {call.get("tool") for call in calls}
+    if "escalate" in names or any(
+        call.get("tool") == "log_checkin"
+        and call.get("arguments", {}).get("status") == "help"
+        for call in calls
+    ):
+        return "help_request"
+    if "schedule_checkin" in names:
+        return "schedule"
+    if "get_status" in names:
+        return "status_query"
+    if "log_checkin" in names:
+        return "routine_checkin"
+    return "unknown"
+
+
+# --------------------------------------------------------------------------
 # The agent
 # --------------------------------------------------------------------------
+_LLM_UNSET = object()
+
+
+def _block_to_dict(block: Any) -> dict[str, Any]:
+    """Turn an SDK content block into a plain dict for the next request."""
+    if isinstance(block, dict):
+        return block
+    if hasattr(block, "model_dump"):
+        return block.model_dump(exclude_none=True)
+    return {
+        key: value
+        for key in ("type", "text", "id", "name", "input")
+        if (value := getattr(block, key, None)) is not None
+    }
+
+
 class CheckInAgent:
     """An MCP client that turns speech into MCP tool calls."""
 
-    def __init__(self, server_url: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        server_url: Optional[str] = None,
+        llm_client: Any = _LLM_UNSET,
+    ) -> None:
         self.server_url = server_url or MCP_URL
         self._client: Optional[Client] = None
         self._roster: list[dict[str, Any]] = []
         self._roster_fetched_at: float = 0.0
+        self._llm = build_llm_client() if llm_client is _LLM_UNSET else llm_client
+        self.mode = "llm" if self._llm is not None else "rules"
 
     # -- connection ------------------------------------------------------
     async def connect(self) -> None:
@@ -449,8 +746,23 @@ class CheckInAgent:
         roster = await self.roster()
         resolved_speaker = resolve_speaker(utterance, roster, speaker)
 
+        # Safety override: help always goes through the rules path, even in AI
+        # mode. A model can add nuance, but it cannot downgrade an explicit
+        # request for help.
         if intent == "help_request":
             return await self._handle_help(utterance, resolved_speaker, roster, matched)
+
+        if self._llm is not None:
+            try:
+                return await self._handle_llm(
+                    utterance, resolved_speaker, roster, source
+                )
+            except Exception as exc:
+                print(
+                    f"[agent] AI mode failed ({exc}); falling back to rules.",
+                    file=sys.stderr,
+                )
+
         if intent == "schedule":
             return await self._handle_schedule(utterance, resolved_speaker, roster)
         if intent == "status_query":
@@ -458,6 +770,157 @@ class CheckInAgent:
         if intent == "routine_checkin":
             return await self._handle_checkin(utterance, resolved_speaker, roster)
         return await self._handle_unknown(utterance, roster)
+
+    # -- AI mode ---------------------------------------------------------
+    async def _handle_llm(
+        self,
+        utterance: str,
+        speaker: Optional[str],
+        roster: list[dict[str, Any]],
+        source: str = "voice",
+    ) -> AgentResult:
+        """Let the model choose MCP tools, then execute them for real.
+
+        Every tool call is validated against the roster and the same limits the
+        rules use before anything runs. A model failure raises, and ``handle``
+        falls back to the rules.
+        """
+        people = [
+            {
+                "name": person.get("name"),
+                "relation": person.get("relation"),
+                "state": person.get("state"),
+            }
+            for person in roster
+        ]
+        system = (
+            "You are the voice behind Check-in Relay, a gentle family wellbeing "
+            "service. Use the MCP tools to act; never invent a person, a "
+            "check-in or an alert. The family roster is "
+            f"{json.dumps(people)}. The speaker selected in the app is "
+            f"{speaker or 'not selected'}. Right now it is "
+            f"{datetime.now().astimezone().isoformat(timespec='seconds')}. "
+            "Call get_status for questions about the family. Call log_checkin "
+            "for a routine check-in. Call schedule_checkin for reminders. Call "
+            "escalate plus log_checkin with status 'help' if the person asks "
+            "for help or describes an emergency. Alerts appear on the family "
+            "dashboard only: never claim that an SMS, call or push was sent. "
+            "After the tools return, answer in one or two short, warm spoken "
+            "sentences with no markdown. This is a wellbeing reminder, not a "
+            "medical service."
+        )
+
+        messages: list[dict[str, Any]] = [{"role": "user", "content": utterance}]
+        calls: list[dict[str, Any]] = []
+        results_by_tool: dict[str, Any] = {}
+
+        for _ in range(3):
+            response = await asyncio.to_thread(
+                self._llm.messages.create,
+                model=llm_model_name(),
+                max_tokens=900,
+                system=system,
+                tools=LLM_TOOL_SCHEMAS,
+                messages=messages,
+            )
+            raw_content = (
+                response.get("content", [])
+                if isinstance(response, dict)
+                else response.content
+            )
+            blocks = [_block_to_dict(block) for block in raw_content]
+            tool_uses = [block for block in blocks if block.get("type") == "tool_use"]
+            text = "".join(
+                block.get("text", "")
+                for block in blocks
+                if block.get("type") == "text"
+            ).strip()
+
+            if not tool_uses:
+                return AgentResult(
+                    intent=intent_for_tool_calls(calls),
+                    reply=text or "I didn't catch that. Are you okay?",
+                    tool_calls=calls,
+                    data=results_by_tool or None,
+                    speaker=speaker,
+                    needs_clarification=not calls and not text,
+                    mode="llm",
+                )
+
+            # Validate the whole turn before executing any of it.
+            planned = [
+                (
+                    block,
+                    normalise_llm_input(
+                        block.get("name", ""),
+                        block.get("input"),
+                        roster,
+                        speaker,
+                        source,
+                    ),
+                )
+                for block in tool_uses
+            ]
+            messages.append({"role": "assistant", "content": blocks})
+
+            tool_results = []
+            for block, arguments in planned:
+                name = block.get("name", "")
+                data = await self.call_tool(name, arguments)
+                calls.append({"tool": name, "arguments": arguments})
+                results_by_tool[name] = data
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.get("id"),
+                        "content": json.dumps(data)[:8000],
+                    }
+                )
+            messages.append({"role": "user", "content": tool_results})
+
+        return AgentResult(
+            intent=intent_for_tool_calls(calls),
+            reply=self._llm_summary(calls, results_by_tool, speaker),
+            tool_calls=calls,
+            data=results_by_tool or None,
+            speaker=speaker,
+            mode="llm",
+        )
+
+    def _llm_summary(
+        self,
+        calls: list[dict[str, Any]],
+        results_by_tool: dict[str, Any],
+        speaker: Optional[str],
+    ) -> str:
+        """A safe spoken reply if the model never produced final text."""
+        intent = intent_for_tool_calls(calls)
+        if intent == "help_request":
+            return (
+                f"I've raised a help alert for {speaker or 'your family member'}. "
+                "It is on the family dashboard now. Please call your local "
+                "emergency services if this is urgent."
+            )
+        if intent == "schedule":
+            data = results_by_tool.get("schedule_checkin", {})
+            return (
+                f"Done. The next check-in is due at "
+                f"{format_due(data.get('next_due'))}."
+            )
+        if intent == "status_query":
+            data = results_by_tool.get("get_status", {})
+            alerts = len(data.get("open_alerts", []))
+            return (
+                f"The family status is on the dashboard. There "
+                f"{'is' if alerts == 1 else 'are'} {alerts} open alert(s)."
+            )
+        if intent == "routine_checkin":
+            data = results_by_tool.get("log_checkin", {})
+            reply = f"Thanks {speaker.split()[0] if speaker else ''}, your check-in is logged.".replace("  ", " ")
+            if data.get("next_due"):
+                reply += f" Your next check-in is due at {format_due(data['next_due'])}."
+            return reply
+        return "I didn't catch that. Are you okay, or do you need help?"
 
     # -- intent handlers -------------------------------------------------
     async def _handle_help(
@@ -553,7 +1016,7 @@ class CheckInAgent:
         recovered = data.get("recovered_alerts") or []
         reply = f"Thanks {speaker.split()[0]}, your check-in is logged."
         if next_due:
-            reply += f" Your next check-in is due at {next_due}."
+            reply += f" Your next check-in is due at {format_due(next_due)}."
         if recovered:
             reply += " I've closed the overdue alert you just cleared."
         return AgentResult(
@@ -590,13 +1053,20 @@ class CheckInAgent:
         minutes = parse_interval_minutes(utterance)
         if minutes is None:
             minutes = 60
+        if minutes <= 0:
+            return AgentResult(
+                intent="schedule",
+                reply="A check-in interval has to be longer than zero seconds. How often should I check in?",
+                needs_clarification=True,
+                speaker=speaker,
+            )
         data = await self.call_tool(
             "schedule_checkin",
             {"person": speaker, "interval_minutes": minutes},
         )
         reply = (
-            f"Done. {speaker} now has a check-in every {minutes} minutes. "
-            f"The next one is due at {data.get('next_due')}."
+            f"Done. {speaker} now has a check-in every {format_interval(minutes)}. "
+            f"The next one is due at {format_due(data.get('next_due'))}."
         )
         return AgentResult(
             intent="schedule",

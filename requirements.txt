@@ -4,3 +4,7 @@ mcp==2.3.0
 fastapi==0.159.1
 uvicorn==0.54.0
 python-dotenv==1.2.4
+
+# Optional AI mode (Part 10). The demo runs without these.
+# Anthropic API:      python -m pip install anthropic
+# Amazon Bedrock:     python -m pip install "anthropic[bedrock]"
