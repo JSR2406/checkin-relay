@@ -43,8 +43,10 @@ SCHEDULES = [
 ]
 
 # (person, minutes ago, status, mood, message)
+# Newest check-ins stay inside each person's interval so the demo starts in a
+# calm, all-ok state instead of opening with phantom overdue alerts.
 HISTORY = [
-    ("Elena Whitfield", 95, "ok", "good", "Slept well, had my tea."),
+    ("Elena Whitfield", 20, "ok", "good", "Slept well, had my tea."),
     ("Samuel Whitfield", 200, "ok", "okay", "Knee was stiff but fine."),
     ("Elena Whitfield", 155, "ok", "good", "Walked to the shops and back."),
     ("Priya Raman", 40, "ok", "great", "Finished the last chapter!"),
@@ -84,7 +86,11 @@ def seed() -> None:
         )
 
     now = db.utcnow()
-    for name, minutes_ago, status, mood, message in HISTORY:
+    # Insert oldest first: record_checkin anchors each person's next_due to the
+    # check-in it is given, so the newest one must be applied last.
+    for name, minutes_ago, status, mood, message in sorted(
+        HISTORY, key=lambda item: item[1], reverse=True
+    ):
         db.record_checkin(
             person_name=name,
             status=status,
