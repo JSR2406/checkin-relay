@@ -1,0 +1,22 @@
+{
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": ["static/**"]
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/index.py"
+    }
+  ],
+  "env": {
+    "USE_INPROCESS_MCP": "1",
+    "CHECKIN_DB": "/tmp/checkin.db",
+    "CHECKIN_SCAN_ON_READ": "1"
+  }
+}

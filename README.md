@@ -13,6 +13,8 @@ immediately. The family sees and resolves everything on a live dashboard.
 
 All people, check-ins and notes in this project are fictional demo data.
 
+> **Live demo:** <https://checkin-relay.vercel.app>
+
 ---
 
 ## What it does
@@ -49,6 +51,25 @@ All people, check-ins and notes in this project are fictional demo data.
 The web app **never** touches the database directly. Every read and every
 write goes through the MCP server, so the MCP integration is the real
 integration rather than a claim in the documentation.
+
+## Live demo (Vercel)
+
+<https://checkin-relay.vercel.app>
+
+Vercel Functions cannot host two long-lived HTTP services, so the deployment
+runs the FastAPI app and the same MCP server **in one process** using the MCP
+SDK's in-memory transport. The tool surface, protocol version, agent rules and
+dashboard are unchanged. The canonical local setup above still uses the
+standalone Streamable HTTP server on port 8000.
+
+The serverless demo stores its synthetic SQLite database in `/tmp`, so demo
+data resets on a cold start. The dashboard also reconciles overdue schedules
+when it reads status (`CHECKIN_SCAN_ON_READ=1`), because background monitor
+tasks are frozen between serverless requests. No real family data should be
+entered.
+
+Deploy config: `vercel.json`, `api/index.py`, `.vercelignore`. The public
+project is under `invicis-projects/checkin-relay`.
 
 ## The MCP server
 

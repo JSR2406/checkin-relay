@@ -30,10 +30,18 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import db
+import seed
 
 MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
 MONITOR_INTERVAL_SECONDS = float(os.getenv("MONITOR_INTERVAL_SECONDS", "5"))
+# Serverless platforms freeze background tasks between requests, so the
+# dashboard's read path can reconcile overdue schedules instead.
+SCAN_ON_READ = os.getenv("CHECKIN_SCAN_ON_READ", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 INSTRUCTIONS = """
 Check-in Relay is a voice-first wellbeing check-in service for a small family.
@@ -77,6 +85,10 @@ async def _monitor_loop() -> None:
 async def app_lifespan(app: MCPServer) -> AsyncIterator[None]:
     """Prepare the database and run the missed-check-in monitor."""
     db.init_db()
+    # A serverless container starts with an empty /tmp. Seed the synthetic
+    # demo family once; normal local runs already have data and skip this.
+    if not db.list_people():
+        seed.seed()
     task = asyncio.create_task(_monitor_loop())
     try:
         yield
@@ -206,6 +218,8 @@ def log_checkin(
 )
 def get_status(person: str | None = None) -> StatusResult:
     """Return the family dashboard snapshot, optionally for one person."""
+    if SCAN_ON_READ:
+        db.detect_missed_checkins()
     snapshot = db.dashboard_snapshot()
     if person:
         wanted = person.strip().lower()

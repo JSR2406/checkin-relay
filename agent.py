@@ -653,8 +653,13 @@ class CheckInAgent:
         self,
         server_url: Optional[str] = None,
         llm_client: Any = _LLM_UNSET,
+        mcp_server: Any = None,
     ) -> None:
         self.server_url = server_url or MCP_URL
+        # An in-process MCPServer avoids a second HTTP service in serverless
+        # deployments such as Vercel. Tests and local runs can keep using the
+        # Streamable HTTP URL.
+        self._mcp_server = mcp_server
         self._client: Optional[Client] = None
         self._roster: list[dict[str, Any]] = []
         self._roster_fetched_at: float = 0.0
@@ -663,7 +668,8 @@ class CheckInAgent:
 
     # -- connection ------------------------------------------------------
     async def connect(self) -> None:
-        client = Client(self.server_url, mode="auto")
+        target = self._mcp_server if self._mcp_server is not None else self.server_url
+        client = Client(target, mode="auto")
         await client.__aenter__()
         self._client = client
         self._roster = []

@@ -1,0 +1,16 @@
+.git/
+.github/
+venv/
+__pycache__/
+*.py[cod]
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.pid
+.env
+.env.*
+!.env.example
+tests/
+demo.py
+test_client.py

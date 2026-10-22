@@ -6,6 +6,7 @@ submitting; everything else is ready.
 - **Project:** Check-in Relay
 - **Track:** Alexa+ (primary)
 - **Repo:** https://github.com/tashawink1757-dot/checkin-relay
+- **Live demo:** https://checkin-relay.vercel.app
 - **License:** MIT
 - **MCP protocol:** `2026-07-28` negotiated over Streamable HTTP (the server
   also advertises `2025-11-25` through the classic handshake)
@@ -84,8 +85,8 @@ tells users to call their local emergency services if something is urgent.
 ## Built with
 
 Python 3.11, `mcp` 2.3.0 (FastMCP, Streamable HTTP), FastAPI, Uvicorn, Pydantic,
-SQLite, HTML/CSS/JavaScript, Web Speech API, `unittest`. Optional AI mode:
-Anthropic Claude or Amazon Bedrock.
+SQLite, HTML/CSS/JavaScript, Web Speech API, `unittest`, Vercel Functions.
+Optional AI mode: Anthropic Claude or Amazon Bedrock.
 
 ## Try it
 
@@ -105,6 +106,9 @@ python web_app.py
 Open <http://127.0.0.1:8001>, then use the quick phrases or the 15-second demo
 control. The README has the full run-through and the test command.
 
+**Live demo:** <https://checkin-relay.vercel.app> (runs the same app and MCP
+server in one Vercel Function; synthetic data resets on a cold start).
+
 ## Submission checklist
 
 - [x] Public GitHub repo with an MIT `LICENSE`
@@ -114,6 +118,7 @@ control. The README has the full run-through and the test command.
 - [x] Product feedback for every tool/API/SDK used (`PRODUCT_FEEDBACK.md`)
 - [x] Optional friction log (`FRICTION_LOG.md`)
 - [x] 64 automated tests, all passing
+- [x] Public live demo: https://checkin-relay.vercel.app
 - [ ] Demo video recorded, public, English, under 3 minutes
 - [ ] Video URL pasted above and played while logged out
 - [ ] Team names filled in

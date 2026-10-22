@@ -189,3 +189,39 @@ configuration, so the web app, the CLI and `demo.py` all get the same values.
 in the dotenv docs, or offer a typed settings helper that raises when a
 configuration key is present in `.env` but missing from the process
 environment.
+
+---
+
+## 7. Vercel Functions - serverless is a different architecture
+
+**Tool/API/SDK:** Vercel CLI 52.0.0 / Vercel Python runtime, `@vercel/python`,
+`mcp` 2.3.0 in-memory transport
+
+**Task attempted:** Publish the working two-process app (FastAPI on 8001, MCP
+Streamable HTTP on 8000) as a public demo link.
+
+**Steps taken:**
+1. Added `api/index.py`, `vercel.json` and `.vercelignore`.
+2. Deployed. The build installed `requirements.txt` and served the dashboard,
+   but the web app could not reach the MCP server because a Vercel Function
+   cannot host a second long-lived HTTP service.
+3. Switched the web app to the MCP SDK's in-process client/server transport,
+   seeded SQLite in `/tmp`, and enabled overdue detection on the read path.
+
+**Expected:** A deployment should preserve the local runtime topology.
+
+**Actual:** Vercel Functions are request-scoped. Background monitor tasks are
+frozen between requests, only `/tmp` is writable, and cold starts can reset the
+database. The CLI also stopped on an interactive Git-remote picker even with
+`--yes`; deploying without `.git` bypassed it.
+
+**Severity:** High for architecture, low for the demo
+
+**Workaround:** `USE_INPROCESS_MCP=1`, `CHECKIN_DB=/tmp/checkin.db` and
+`CHECKIN_SCAN_ON_READ=1` produce one self-contained Function. The canonical
+Streamable HTTP server remains the local/CI path and is still verified by
+`test_client.py`.
+
+**Suggestion:** Document the serverless constraints next to the Python
+runtime docs, especially "no long-lived processes", `/tmp` persistence, and a
+non-interactive way to skip Git linking when a repo has multiple remotes.

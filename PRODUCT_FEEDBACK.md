@@ -257,14 +257,14 @@ in a clean clone.
 
 ## 10. MCP Inspector - considered, not used
 
-**How we used it.** Not used. The MCP Inspector is the usual way to explore a
-server by hand, but it is distributed through `npx` and Node.js is not
-installed on the development machine.
+**How we used it.** Not used for the checked-in demo. `test_client.py` is the
+repeatable client: it connects over Streamable HTTP, prints the negotiated
+protocol version, lists every tool with its arguments, and calls all four
+required tools. The `/health` route gives the same at-a-glance view.
 
-**What we did instead.** `test_client.py` does the job an Inspector would:
-it connects over Streamable HTTP, prints the negotiated protocol version,
-lists every tool with its arguments, and calls all four required tools. The
-`/health` route gives the same at-a-glance view.
+**Why.** A scripted client is repeatable in CI and leaves no manual steps for a
+judge. The Inspector is better for ad-hoc JSON-RPC experimentation, which was
+not needed after the protocol tests passed.
 
 **Limitations.** The Inspector can issue arbitrary raw JSON-RPC, which is
 useful for testing protocol edge cases we did not need.
@@ -272,8 +272,32 @@ useful for testing protocol edge cases we did not need.
 **Onboarding.** We read the tool listing our own client printed and knew what
 was registered, which is the part we actually needed.
 
-**Would we use it again?** Yes, on a machine with Node.js - for protocol-level
-exploration it is still the best tool available.
+**Would we use it again?** Yes, for interactive protocol debugging.
+
+---
+
+## 11. Vercel Functions - deployment
+
+**How we used it.** The public demo runs as one Vercel Python Function:
+`api/index.py` exports the FastAPI `app`, and `vercel.json` routes every path
+to it. The MCP server connects to the same process through the SDK's in-memory
+transport instead of a second HTTP service.
+
+**What worked well.** The Python build picked up `requirements.txt`, the ASGI
+app deployed without a custom server, and the static dashboard was included
+with `includeFiles`. Cold starts were fast enough for the demo.
+
+**Limitations.**
+- A Function is request-scoped, not a long-running host, so the two-process
+  Streamable HTTP design used locally cannot be deployed as-is.
+- Only `/tmp` is writable, so SQLite lives there and synthetic demo data resets
+  on a cold start.
+- Background tasks freeze between requests, so overdue schedules are reconciled
+  on the dashboard read path (`CHECKIN_SCAN_ON_READ=1`).
+
+**Would we use it again?** Yes for a serverless demo. For a real care product we
+would use a managed database and a host that supports the always-on MCP server
+and monitor.
 
 ---
 
@@ -293,7 +317,8 @@ exploration it is still the best tool available.
 | AnyIO 4.15.1 | Thread offload for sync tools | Yes |
 | HTTPX2 2.16.0 | HTTP under the MCP client | Indirectly |
 | Standard library | Tests, CLI, JSON | Yes |
-| MCP Inspector | Protocol exploration | Yes, with Node.js |
+| MCP Inspector | Protocol exploration | Yes, for ad-hoc debugging |
+| Vercel Functions | Public serverless demo | Yes, with caveats |
 
 The most useful thing in the whole stack was the MCP SDK. The most useful
 thing in the rest was the fact that it was all small enough to read.
